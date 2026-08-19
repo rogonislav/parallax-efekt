@@ -1,112 +1,120 @@
 #include <raylib.h>
 #include <string>
 #include <iostream>
+#include <vector>
+#include <format>
 
-Texture2D prlxBG;
-Texture2D prlxFG1;
-Texture2D prlxFG2;
-Texture2D prlxFG3;
+// '* 240' -> nasobime target FPS, aby sme docielili rovnaku rychlost pri kazdom fps (nie len pri 240)
+constexpr float FG1_VEL = 48;   // 0.2f * 240
+constexpr float FG2_VEL = 96;   // 0.4f * 240
+constexpr float FG3_VEL = 144;  // 0.6f * 240
 
-Texture2D prlxFG1_copy;
-Texture2D prlxFG2_copy;
-Texture2D prlxFG3_copy;
-
-float prlxFG1_vel = 0.2f;
-float prlxFG2_vel = 0.4f;
-float prlxFG3_vel = 0.6f;
-
-float FG1_curPos = 0.0f;
-float FG2_curPos = 0.0f;
-float FG3_curPos = 0.0f;
-
-float FG1_copy_curPos = 1600.0f;
-float FG2_copy_curPos = 1600.0f;
-float FG3_copy_curPos = 1600.0f;
-
-void Parallax(){
-
-    //pohyb textur foreground layerov pozadia
-    FG1_curPos -= prlxFG1_vel;
-    FG1_copy_curPos -= prlxFG1_vel;
-    DrawTexture(prlxFG1,FG1_curPos,-250,WHITE);
-    DrawTexture(prlxFG1_copy,FG1_copy_curPos,-250, WHITE);
-
-    FG2_curPos -= prlxFG2_vel;
-    FG2_copy_curPos -= prlxFG2_vel;
-    DrawTexture(prlxFG2,FG2_curPos,-250,WHITE);
-    DrawTexture(prlxFG2_copy,FG2_copy_curPos,-250, WHITE);
-
-    FG3_curPos -= prlxFG3_vel;
-    FG3_copy_curPos -= prlxFG3_vel;
-    DrawTexture(prlxFG3,FG3_curPos,-250,WHITE);
-    DrawTexture(prlxFG3_copy,FG3_copy_curPos,-250, WHITE);
-    
-    //cyklacia textur 
-    if (FG1_curPos <= -(prlxFG1.width)){
-        FG1_curPos = prlxFG1.width;
-    }
-    if (FG1_copy_curPos <= -(prlxFG1_copy.width)){
-        FG1_copy_curPos = prlxFG1_copy.width;
+class TextureManager {
+private:
+    std::vector<Texture2D> textures;
+public:
+    Texture2D Load(const std::string& path) {
+        Texture2D tex = LoadTexture(path.c_str());
+        textures.push_back(tex);
+        return tex;
     }
 
-    if (FG2_curPos <= -(prlxFG2.width)){
-        FG2_curPos = prlxFG2.width;
+    ~TextureManager() {
+        for(auto& tex : textures) {
+            UnloadTexture(tex);
+        }
     }
-    if (FG2_copy_curPos <= -(prlxFG2_copy.width)){
-        FG2_copy_curPos = prlxFG2_copy.width;
+};
+
+class ParalaxProp {
+private:
+    Texture2D tex;
+    Vector2 pos1, pos2;
+    float vel; // TODO: zovseobecnit -> spravit cez Vector2 -> podpora pre vsetky osi, nielen os x; 
+public:
+    ParalaxProp(Texture2D _tex, float _vel, Vector2 _pos1): tex(_tex), vel(_vel), pos1(_pos1) {
+        // pri zovseobcnovani venovat pozornost
+        pos2 = { pos1.x + tex.width, pos1.y };
     }
 
-    if (FG3_curPos <= -(prlxFG3.width)){
-        FG3_curPos = prlxFG3.width;
-    }
-    if (FG3_copy_curPos <= -(prlxFG3_copy.width)){
-        FG3_copy_curPos = prlxFG3_copy.width;
+    void Update(float delta) {
+        // 'vel.x' je zakomentovane, pretoze by to bolo FPS-dependent -> pri vyssich FPSkach by sa to pohybovalo rychlejsie
+        pos1.x -= vel * delta; //vel.x;
+        pos2.x -= vel * delta; //vel.x;
+
+        // PRIPRAVENE PRE ZOVSEOBECNENIE:
+        /*
+        pos1.y -= vel.y;
+        pos2.y -= vel.y;
+        */
+
+        if(pos1.x < -tex.width) {
+            pos1.x = pos2.x + tex.width;
+        }
+        if(pos2.x < -tex.width) {
+            pos2.x = pos1.x + tex.width;
+        }
     }
 
-    if (IsKeyDown(KEY_SPACE)){
-        prlxFG1_vel = 0.0f;
-        prlxFG2_vel = 0.0f;
-        prlxFG3_vel = 0.0f;
-    }else{
-        prlxFG1_vel = 0.2f;
-        prlxFG2_vel = 0.4f;
-        prlxFG3_vel = 0.6f;
+    void Draw() {
+        DrawTexture(tex, pos1.x, pos1.y, WHITE);
+        DrawTexture(tex, pos2.x, pos2.y, WHITE);
+    }
+};
+
+void ParallaxUaD(std::vector<ParalaxProp>& paralaxProps, float delta) {
+    for(auto& pair : paralaxProps) {
+        if(!IsKeyDown(KEY_SPACE))
+            pair.Update(delta);
+        pair.Draw();
     }
 }
 
-void TextureManager(){
-    //loadovanie textur parallax pozadia 2-krát -> 2 instances, jedno zajde za kameru druhe je na kamere
-    prlxBG = LoadTexture("textury/parallax/prlx_bg.png");
+int main() {
+    InitWindow(800, 500, "Parallax");
+    int targetFPSindex = 0;
 
-    prlxFG1 = LoadTexture("textury/parallax/prlx_fg1.png");
-    prlxFG2 = LoadTexture("textury/parallax/prlx_fg2.png");
-    prlxFG3 = LoadTexture("textury/parallax/prlx_fg3.png");
+    // DOSTUPNE FPS -> 24, 30, 60, 120, 144, 240
+    auto fpsVals = std::to_array({24, 30, 60, 120, 144, 240});
+    SetTargetFPS(fpsVals[targetFPSindex]);
 
-    prlxFG1_copy = LoadTexture("textury/parallax/prlx_fg1_copy.png");
-    prlxFG2_copy = LoadTexture("textury/parallax/prlx_fg2_copy.png");
-    prlxFG3_copy = LoadTexture("textury/parallax/prlx_fg3_copy.png");
-}
+    TextureManager texMgr;
+    std::vector<ParalaxProp> paralaxProps;
+    paralaxProps.emplace_back(texMgr.Load("textury/parallax/prlx_bg.png"), 0.0f, Vector2{0.0f, -250.0f});
+    paralaxProps.emplace_back(texMgr.Load("textury/parallax/prlx_fg1.png"), FG1_VEL, Vector2{0.0f, -250.0f});
+    paralaxProps.emplace_back(texMgr.Load("textury/parallax/prlx_fg2.png"), FG2_VEL, Vector2{0.0f, -250.0f});
+    paralaxProps.emplace_back(texMgr.Load("textury/parallax/prlx_fg3.png"), FG3_VEL, Vector2{0.0f, -250.0f});
 
-int main(){
-    InitWindow(800,500,"Parallax");
-    SetTargetFPS(240);
+    while (!WindowShouldClose()) {
 
-    TextureManager();    
-
-    while (!WindowShouldClose()){
-        BeginDrawing();
-        ClearBackground(WHITE);
-
-        //vykreslovanie textury pozadia
-        DrawTexture(prlxBG,0,-250,WHITE);
-
-        Parallax();
-
-        EndDrawing();
-
-        if (IsKeyPressed(KEY_ENTER)){
+        if (IsKeyPressed(KEY_ENTER)) {
             TakeScreenshot("screenshot.png");
         }
+
+        // RYCHLOST OBJEKTOV JE NEZAVISLY OD FPS, PRETOZE POUZIVAME DELTU
+        if(IsKeyPressed(KEY_RIGHT)) {
+            targetFPSindex++;
+            if(targetFPSindex >= fpsVals.size())
+                targetFPSindex = fpsVals.size() - 1;
+            SetTargetFPS(fpsVals[targetFPSindex]);
+        }
+        if(IsKeyPressed(KEY_LEFT)) {
+            targetFPSindex--;
+            if(targetFPSindex < 0)
+                targetFPSindex = 0;
+            SetTargetFPS(fpsVals[targetFPSindex]);
+        }
+
+        BeginDrawing();
+
+        ClearBackground(WHITE);
+
+        ParallaxUaD(paralaxProps, GetFrameTime());
+        
+        DrawText(std::format("MAX: {}", fpsVals[targetFPSindex]).c_str(), 4, 4, 20, RED);
+        DrawText(std::format("FPS: {}", GetFPS()).c_str(), 4, 25, 20, GREEN);
+
+        EndDrawing();
     }
 
     CloseWindow();
